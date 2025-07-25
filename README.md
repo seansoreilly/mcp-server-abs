@@ -2,6 +2,10 @@
 
 An MCP (Model Context Protocol) server that provides access to the Australian Bureau of Statistics (ABS) Data API. This server allows AI assistants to query and analyze ABS statistical data.
 
+<a href="https://glama.ai/mcp/servers/@seansoreilly/mcp-server-abs">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@seansoreilly/mcp-server-abs/badge" alt="ABS Server MCP server" />
+</a>
+
 ## Features
 
 - Query ABS datasets with optional filters
