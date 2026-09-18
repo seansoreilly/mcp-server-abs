@@ -19,16 +19,19 @@ npm run typecheck  # both tsconfigs: src and tests
 
 ## Tests
 
-Vitest, in `tests/` (not `src/`, which would ship them in the published `build/`). 61 tests across four files:
+Vitest, in `tests/` (not `src/`, which would ship them in the published `build/`):
 
 - `tests/parser.test.ts` — characterises the real SDMX-ML payload shape against `dataflows.xml`.
 - `tests/ABSApiClient.test.ts` — URL/param/Accept-header shaping and error mapping, with axios mocked.
-- `tests/DataFlowService.test.ts` — cache lifecycle (fresh/stale/forced/ENOENT/corrupt) and flow extraction.
+- `tests/DataFlowService.test.ts` — cache lifecycle (fresh/stale/forced/ENOENT/corrupt) and per-flow mapping. Mocks `ABSApiClient`, so it does **not** exercise the real parser.
+- `tests/dataflow-extraction.test.ts` — end-to-end extraction from the real fixture. Mocks only axios, so the production `XMLParser` config and the lookup path are both live. This is the file that holds the parser-bug guards; they are inert if `ABSApiClient` is mocked.
 - `tests/server.integration.test.ts` — spawns `build/index.js` and drives it with the SDK's own MCP client over stdio. Doubles as a guard on the stdio contract: anything logged to stdout breaks the handshake and fails these tests.
 
 `tsconfig.test.json` typechecks `tests/` (the base config's `include`/`rootDir` cover `src` only).
 
-**Known bugs are marked `it.fails`**, each with a comment naming the defect and the fix. They pass while the bug exists and flip to red — forcing the marker's removal — once it's fixed. The suite is green both before and after the parser fix; verified by applying it and re-running. Don't "fix" a failing `it.fails` test by deleting it: it means the bug is gone, so drop the `.fails` instead.
+**Known bugs are marked `it.fails`**, each with a comment naming the defect and the fix. They pass while the bug exists; once it is fixed they report `Expect test to fail`, which forces the marker's removal. Don't "fix" such a failure by deleting the test — it means the bug is gone, so drop the `.fails` instead.
+
+Verified by applying the parser fix and re-running: the suite is fully green on current `main`, and the four guards in `dataflow-extraction.test.ts` all flip to `Expect test to fail` once the fix lands. **When adding an `it.fails` guard, confirm it actually flips** — a guard whose collaborator is mocked out will pass in both states and silently protect nothing.
 
 ## What this is
 

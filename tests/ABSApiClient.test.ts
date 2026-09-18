@@ -206,7 +206,11 @@ describe('ABSApiClient', () => {
             // `xmlParser.parse()`. Fix: branch on the response content type and
             // parse JSON as JSON. This test flips green when that lands.
             const payload = { data: { dataSets: [{ series: {} }] } };
-            axiosStub.get.mockResolvedValue({ data: JSON.stringify(payload), config: {} });
+            axiosStub.get.mockResolvedValue({
+                data: JSON.stringify(payload),
+                config: {},
+                headers: { 'content-type': 'application/vnd.sdmx.data+json' },
+            });
             const client = new ABSApiClient();
 
             const result = await client.getData('CPI', 'all', { format: 'jsondata' });

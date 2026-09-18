@@ -1,15 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
-import { XMLParser } from 'fast-xml-parser';
 import type { DataFlow, DataFlowCache } from '../src/types/abs.js';
-import {
-    createMockLogger,
-    makeTempDir,
-    loadDataflowsXml,
-    FIXTURE_FLOW_COUNT,
-    FIXTURE_FIRST_FLOW,
-} from './helpers.js';
+import { createMockLogger, makeTempDir } from './helpers.js';
 
 const mockLogger = createMockLogger();
 vi.mock('../src/utils/logger.js', () => ({ default: mockLogger }));
@@ -43,7 +36,8 @@ const SAMPLE_FLOWS: DataFlow[] = [
  * (`Structure.Dataflows.Dataflow`) and the path the real payload uses once the
  * namespace bug is fixed (`Structure.Structures.Dataflows.Dataflow`). These
  * tests are about the per-flow mapping, not the lookup path, so they must stay
- * green either way — the lookup path is covered by the fixture tests below.
+ * green either way — the lookup path is covered end-to-end against the real
+ * fixture in `dataflow-extraction.test.ts`.
  */
 function parsedResponse(flows: unknown): Record<string, unknown> {
     return {
@@ -299,64 +293,6 @@ describe('DataFlowService', () => {
             const flows = await service.getDataFlows();
 
             expect(flows[0].structure).toBeUndefined();
-        });
-    });
-
-    describe('extraction against the real ABS payload', () => {
-        /**
-         * Parses the committed fixture with the *production* parser options and
-         * feeds the result to the service, exactly as ABSApiClient would.
-         */
-        async function parseFixtureAsProductionDoes(): Promise<unknown> {
-            const xml = await loadDataflowsXml();
-            const parser = new XMLParser({
-                ignoreAttributes: false,
-                attributeNamePrefix: '',
-                textNodeName: '_text',
-            });
-            return parser.parse(xml);
-        }
-
-        it.fails('extracts all 1208 dataflows from the captured response', async () => {
-            // KNOWN BUGS (#2 and #3): the parser does not strip namespace
-            // prefixes and `DataFlowService.ts:76` looks up
-            // `Structure.Dataflows.Dataflow`. The real path is
-            // Structure > Structures > Dataflows > Dataflow. The `|| []`
-            // fallback turns the miss into a silent empty success.
-            // Fix: set `removeNSPrefix: true` on the XMLParser AND add the
-            // missing `Structures` level. This test flips green when both land.
-            getDataFlows.mockResolvedValue(await parseFixtureAsProductionDoes());
-            const service = new DataFlowService(cacheFile, 24);
-
-            const flows = await service.getDataFlows();
-
-            expect(flows).toHaveLength(FIXTURE_FLOW_COUNT);
-        });
-
-        it.fails('populates name and description from common:Name / common:Description', async () => {
-            // KNOWN BUG (#3): resolved by the same `removeNSPrefix` fix.
-            getDataFlows.mockResolvedValue(await parseFixtureAsProductionDoes());
-            const service = new DataFlowService(cacheFile, 24);
-
-            const flows = await service.getDataFlows();
-            const first = flows[0];
-
-            expect(first.id).toBe(FIXTURE_FIRST_FLOW.id);
-            expect(first.name).toContain(FIXTURE_FIRST_FLOW.namePrefix);
-            expect(first.description).not.toBe('');
-        });
-
-        it.fails('never reports success with an empty result set', async () => {
-            // KNOWN BUG (#2): the `|| []` fallback at DataFlowService.ts:76
-            // converts a failed lookup into a successful empty response, so a
-            // caller cannot distinguish "no dataflows" from "parsing broke".
-            // Fix: assert a non-empty result instead of defaulting to `[]`.
-            getDataFlows.mockResolvedValue(await parseFixtureAsProductionDoes());
-            const service = new DataFlowService(cacheFile, 24);
-
-            const flows = await service.getDataFlows();
-
-            expect(flows.length).toBeGreaterThan(0);
         });
     });
 
