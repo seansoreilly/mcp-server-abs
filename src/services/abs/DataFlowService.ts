@@ -53,7 +53,7 @@ export class DataFlowService {
         }
     }
 
-    async getFlowData(flowId: string, dataKey: string = 'all', options?: DataQueryOptions) {
+    async getFlowData(flowId: string, dataKey: string = 'all', options?: DataQueryOptions): Promise<unknown> {
         logger.info('Getting flow data', { flowId, dataKey, options });
         return this.apiClient.getData(flowId, dataKey, options);
     }
@@ -69,37 +69,30 @@ export class DataFlowService {
         }
     }
 
-    private extractDataFlows(parsed: any): DataFlow[] {
+    private extractDataFlows(parsed: unknown): DataFlow[] {
         logger.debug('Extracting data flows from parsed XML');
-        try {
-            // Path to dataflows based on SDMX-ML format
-            const dataflows = parsed.Structure?.Dataflows?.Dataflow || [];
-            const flows = Array.isArray(dataflows) ? dataflows : [dataflows];
-
-            return flows.map((flow: any) => {
-                const dataFlow: DataFlow = {
-                    id: flow.id,
-                    agencyID: flow.agencyID,
-                    version: flow.version,
-                    name: flow.Name?._text || '',
-                    description: flow.Description?._text || ''
-                };
-
-                // Add structure reference if available
-                if (flow.Structure?.Ref) {
-                    dataFlow.structure = {
-                        id: flow.Structure.Ref.id,
-                        version: flow.Structure.Ref.version,
-                        agencyID: flow.Structure.Ref.agencyID
-                    };
-                }
-
-                return dataFlow;
-            });
-        } catch (error) {
-            logger.error('Error extracting data flows from parsed XML', { error });
-            throw error;
+        const structure = asRecord(asRecord(parsed)?.Structure);
+        const structures = asRecord(structure?.Structures);
+        const dataflows = asRecord(structures?.Dataflows)?.Dataflow;
+        const flows: unknown[] = Array.isArray(dataflows) ? dataflows : dataflows == null ? [] : [dataflows];
+        if (flows.length === 0) {
+            throw new Error('ABS API response contains no dataflows');
         }
+
+        return flows.map((value): DataFlow => {
+            const flow = asRecord(value);
+            const identity = readIdentity(flow);
+            const dataFlow: DataFlow = {
+                ...identity,
+                name: readText(flow?.Name),
+                description: readText(flow?.Description)
+            };
+            const reference = asRecord(flow?.Structure)?.Ref;
+            if (reference !== undefined) {
+                dataFlow.structure = readIdentity(asRecord(reference));
+            }
+            return dataFlow;
+        });
     }
 
     private async loadCache(): Promise<DataFlowCache | null> {
@@ -139,7 +132,7 @@ export class DataFlowService {
     }
 
     private isCacheValid(): boolean {
-        if (!this.cache) {
+        if (!this.cache || this.cache.flows.length === 0) {
             logger.debug('Cache is null');
             return false;
         }
@@ -160,4 +153,29 @@ export class DataFlowService {
     public static formatDataflowIdentifier(flow: DataFlow): string {
         return `${flow.agencyID},${flow.id},${flow.version}`;
     }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined;
+}
+
+function readIdentity(value: Record<string, unknown> | undefined): Pick<DataFlow, 'id' | 'agencyID' | 'version'> {
+    const { id, agencyID, version } = value ?? {};
+    if (typeof id !== 'string' || !id.trim() || typeof agencyID !== 'string' || !agencyID.trim() ||
+        typeof version !== 'string' || !version.trim()) {
+        throw new Error('Invalid dataflow identity in ABS API response');
+    }
+    return { id, agencyID, version };
+}
+
+function readText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) {
+        const english = value.find((entry: unknown) => asRecord(entry)?.lang === 'en');
+        return readText(english ?? value[0]);
+    }
+    const text = asRecord(value)?._text;
+    return typeof text === 'string' ? text : '';
 }

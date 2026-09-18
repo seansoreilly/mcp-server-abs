@@ -115,6 +115,30 @@ describe('MCP server (stdio)', () => {
         expect(properties.datasetId?.type).toBe('string');
     });
 
+    it('advertises a title, read-only annotations, and a structured output contract', async () => {
+        const { tools } = await client.listTools();
+        expect(client.getServerVersion()?.title).toBe('Australian Bureau of Statistics');
+        expect(tools[0]).toMatchObject({
+            title: 'Query ABS Dataset',
+            annotations: {
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: true,
+            },
+            outputSchema: {
+                type: 'object',
+                required: ['datasetId', 'data', 'sourceUrl'],
+                additionalProperties: false,
+                properties: {
+                    datasetId: { type: 'string' },
+                    data: { type: 'object' },
+                    sourceUrl: { type: 'string', format: 'uri' },
+                },
+            },
+        });
+    });
+
     it('rejects an unknown tool name as a protocol error', async () => {
         // Per the tools spec, an unknown tool is a *protocol* error: the model
         // cannot fix it by retrying with different arguments, so it surfaces as
@@ -234,7 +258,29 @@ describe('MCP server (upstream ABS API succeeds)', () => {
         });
 
         expect(result.isError).toBeFalsy();
-        expect(JSON.parse(resultText(result))).toEqual(payload);
+        expect(result.structuredContent).toEqual({
+            datasetId: 'C21_G01_LGA',
+            data: payload,
+            sourceUrl: `${stub.baseUrl}/rest/data/C21_G01_LGA/all?format=json&dimensionAtObservation=AllDimensions`,
+        });
+        expect(JSON.parse(resultText(result))).toEqual(result.structuredContent);
+    });
+
+    it('links to the same upstream dataset as the structured result', async () => {
+        const result = await callTool(client, 'query_dataset', { datasetId: 'C21_G01_LGA' });
+        expect(result.content.find((block) => block.type === 'resource_link')).toMatchObject({
+            type: 'resource_link',
+            name: 'C21_G01_LGA',
+            uri: result.structuredContent?.sourceUrl,
+            mimeType: 'application/vnd.sdmx.data+json',
+        });
+    });
+
+    it('encodes dataset IDs as a single path segment', async () => {
+        await callTool(client, 'query_dataset', { datasetId: 'ABS,TEST,1.0?x=y#z' });
+        expect(requestedPaths.at(-1)).toBe(
+            '/rest/data/ABS%2CTEST%2C1.0%3Fx%3Dy%23z/all?format=json&dimensionAtObservation=AllDimensions'
+        );
     });
 
     it('requests the dataset by id', async () => {
@@ -254,4 +300,26 @@ describe('MCP server (upstream ABS API succeeds)', () => {
             /^\/rest\/data\/C21_G01_LGA\/all\?/
         );
     });
+});
+
+describe('MCP server (invalid upstream JSON shape)', () => {
+    it.each(['null', '[]', '42', '"text"', '<html>upstream error</html>'])(
+        'returns a tool error for %s without structured success data', async (body) => {
+            const stub = await startStubAbsApi((_req, res) => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(body);
+            });
+            const { client, close } = await connectServer({ ABS_API_BASE: stub.baseUrl });
+            try {
+                await client.listTools();
+                const result = await callTool(client, 'query_dataset', { datasetId: 'TEST' });
+                expect(result.isError).toBe(true);
+                expect(result.structuredContent).toBeUndefined();
+                expect(resultText(result)).toContain('JSON object');
+            } finally {
+                await close();
+                await stub.close();
+            }
+        }
+    );
 });
