@@ -4,12 +4,31 @@ An MCP (Model Context Protocol) server that provides access to the Australian Bu
 
 ## Features
 
-- Dynamic discovery of all available ABS datasets via SDMX-ML API
-- Query ABS datasets with optional filters
-- Support for multiple data formats (JSON, CSV, XML)
-- Built on the MCP protocol for seamless integration with AI assistants
-- Caching system for improved performance
-- Comprehensive logging and error handling
+The server currently exposes **one tool**:
+
+- **`query_dataset`** — fetches an ABS dataset by id (e.g. `C21_G01_LGA`) and returns
+  the SDMX-JSON payload as both text and `structuredContent`, with a `resource_link`
+  to the upstream URL. Declares a `title`, read-only annotations, and an `outputSchema`.
+
+Built on MCP protocol revision `2025-11-25` (SDK v2, legacy era) over stdio.
+
+### Not yet exposed
+
+`ABSApiClient` and `DataFlowService` implement dataset discovery, multi-format
+support (JSON/CSV/XML), and on-disk caching with a configurable refresh interval.
+They are fully tested but **not currently wired into the server**, so no tool
+surfaces them yet — a `list_dataflows` tool is the natural next step. Treat the
+section below as a description of the service layer, not of the tool surface.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ABS_API_BASE` | `https://data.api.abs.gov.au` | ABS API origin; override to point at a stub |
+| `ABS_LOG_LEVEL` | `debug` | Winston log level |
+| `ABS_LOG_DIR` | `<cwd>/logs` | Directory for log files |
+
+All logging goes to **stderr**, never stdout — stdout carries the MCP JSON-RPC channel.
 
 ## Installation
 
@@ -21,7 +40,7 @@ npm install
 
 ### Prerequisites
 
-- Node.js 18 or higher
+- Node.js 20 or higher (required by the MCP SDK v2 packages)
 - npm 8 or higher
 
 ### Building
@@ -40,21 +59,27 @@ npm start
 
 - `npm run build`: Build the TypeScript code
 - `npm start`: Run the server
+- `npm test`: Build, then run the test suite (Vitest)
+- `npm run typecheck`: Typecheck both `src/` and `tests/`
+- `npm run lint` / `npm run lint:fix`: Biome lint + format check
 - `npm run inspector`: Run the MCP inspector for testing
 
 ## Project Structure
 
 ```
 src/
-├── index.ts                # Main server implementation
+├── index.ts                   # Process entry point: transport + main()
+├── server.ts                  # buildServer(): tool registration and handlers
 ├── services/
 │   └── abs/
-│       ├── ABSApiClient.ts # ABS API communication
-│       └── DataFlowService.ts # Data flow management and caching
+│       ├── ABSApiClient.ts    # ABS API communication (not yet wired in)
+│       └── DataFlowService.ts # Dataflow caching (not yet wired in)
 ├── types/
-│   └── abs.ts             # TypeScript type definitions
+│   └── abs.ts                 # Type definitions, incl. the ABSError class
 └── utils/
-    └── logger.ts          # Logging configuration
+    └── logger.ts              # Winston config; all output to stderr
+tests/                         # Vitest suite, incl. stdio integration tests
+agent_docs/                    # Protocol research notes
 ```
 
 ## Implementation Details
@@ -77,11 +102,11 @@ The `DataFlowService` class manages ABS data flows:
 
 ### Logging
 
-Comprehensive logging system using Winston:
-- Debug-level logging for development
-- Structured JSON logging format
-- Console and file transport options
-- Configurable log levels and formats
+Winston, configured for an stdio MCP server:
+- **Every level writes to stderr.** stdout is the JSON-RPC channel, so a single
+  log line there would corrupt the protocol.
+- Structured JSON to rotating files under `ABS_LOG_DIR`; human-readable to the console
+- Level and directory set via `ABS_LOG_LEVEL` / `ABS_LOG_DIR`
 
 ## Integration with Claude Desktop
 

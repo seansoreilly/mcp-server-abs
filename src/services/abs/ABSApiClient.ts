@@ -1,7 +1,9 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { type AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { ABS_API_BASE, ABS_REQUEST_TIMEOUT_MS } from '../../config.js';
+import type { DataFormat, DataQueryOptions, DetailLevel, ReferenceScope } from '../../types/abs.js';
+import { ABSError } from '../../types/abs.js';
 import logger from '../../utils/logger.js';
-import { DetailLevel, ReferenceScope, DataFormat, DataQueryOptions, ABSError } from '../../types/abs.js';
 
 export class ABSApiClient {
     private readonly api: AxiosInstance;
@@ -9,18 +11,18 @@ export class ABSApiClient {
 
     constructor() {
         this.api = axios.create({
-            baseURL: 'https://data.api.abs.gov.au',
-            timeout: 30000, // 30 seconds
+            baseURL: ABS_API_BASE,
+            timeout: ABS_REQUEST_TIMEOUT_MS,
             headers: {
-                'Accept': 'application/xml'
-            }
+                Accept: 'application/xml',
+            },
         });
 
         this.xmlParser = new XMLParser({
             ignoreAttributes: false,
             attributeNamePrefix: '',
             textNodeName: '_text',
-            removeNSPrefix: true
+            removeNSPrefix: true,
         });
 
         // Add response interceptor for logging
@@ -29,13 +31,12 @@ export class ABSApiClient {
                 logger.debug('API Response received', {
                     url: response.config.url,
                     status: response.status,
-                    dataSize: response.data?.length
+                    dataSize: response.data?.length,
                 });
                 return response;
             },
             (error) => {
-                this.handleError(error);
-                throw error;
+                throw this.toAbsError(error);
             }
         );
     }
@@ -45,8 +46,8 @@ export class ABSApiClient {
 
         const response = await this.api.get<unknown>('/rest/dataflow', {
             headers: {
-                'Accept': 'application/vnd.sdmx.structure+xml;version=2.1'
-            }
+                Accept: 'application/vnd.sdmx.structure+xml;version=2.1',
+            },
         });
 
         return this.parseXml(response.data);
@@ -62,14 +63,14 @@ export class ABSApiClient {
             structureType,
             agencyId,
             detail,
-            references
+            references,
         });
 
         const response = await this.api.get<unknown>(`/rest/${structureType}/${agencyId}`, {
             params: {
                 detail,
-                references
-            }
+                references,
+            },
         });
 
         return this.parseXml(response.data);
@@ -83,18 +84,18 @@ export class ABSApiClient {
         logger.info('Fetching data from ABS API', {
             dataflowId,
             dataKey,
-            options
+            options,
         });
 
         const format = options?.format ?? 'jsondata';
         const response = await this.api.get<unknown>(`/rest/data/${dataflowId}/${dataKey}`, {
             params: {
                 ...options,
-                format
+                format,
             },
             headers: {
-                'Accept': this.getAcceptHeader(format)
-            }
+                Accept: this.getAcceptHeader(format),
+            },
         });
 
         const contentType = String(response.headers?.['content-type'] ?? '').toLowerCase();
@@ -105,9 +106,8 @@ export class ABSApiClient {
         // than trusting `format`: `jsondata` is the default, so keying off it
         // would send an XML body down the JSON path.
         if (contentType.includes('json') || (!contentType && this.looksLikeJson(response.data))) {
-            const data: unknown = typeof response.data === 'string'
-                ? JSON.parse(response.data)
-                : response.data;
+            const data: unknown =
+                typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
             if (data === null || typeof data !== 'object') {
                 throw new Error('Invalid JSON data response from ABS API');
             }
@@ -155,26 +155,29 @@ export class ABSApiClient {
         }
     }
 
-    private handleError(error: unknown): never {
-        const absError: ABSError = new Error('ABS API Error');
-        
+    /**
+     * Converts an unknown thrown value into a structured {@link ABSError}.
+     *
+     * Returns rather than throws so callers read as `throw this.toAbsError(e)`
+     * — the previous `: never` signature made the `throw` that followed every
+     * call site unreachable.
+     */
+    private toAbsError(error: unknown): ABSError {
         if (axios.isAxiosError(error)) {
-            absError.message = error.message;
-            absError.status = error.response?.status;
-            absError.statusText = error.response?.statusText;
-            absError.url = error.config?.url;
-
             logger.error('ABS API Error', {
                 status: error.response?.status,
                 statusText: error.response?.statusText,
                 url: error.config?.url,
-                message: error.message
+                message: error.message,
             });
-        } else {
-            absError.message = error instanceof Error ? error.message : 'Unknown error';
-            logger.error('Unknown API Error', { error });
+            return new ABSError(error.message, {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+            });
         }
 
-        throw absError;
+        logger.error('Unknown API Error', { error });
+        return new ABSError(error instanceof Error ? error.message : 'Unknown error');
     }
 }

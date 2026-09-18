@@ -1,8 +1,8 @@
-import fs from 'fs/promises';
-import path from 'path';
-import os from 'os';
-import { createServer, type IncomingMessage, type ServerResponse } from 'http';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs/promises';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { vi } from 'vitest';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
