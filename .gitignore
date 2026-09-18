@@ -34,3 +34,6 @@ Thumbs.db
 .npm
 .eslintcache
 *.tsbuildinfo
+
+# Claude Code worktrees
+.claude/worktrees/
