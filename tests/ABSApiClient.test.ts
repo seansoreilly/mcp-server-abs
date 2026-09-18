@@ -61,7 +61,8 @@ describe('ABSApiClient', () => {
             new ABSApiClient();
 
             // `https://data.api.abs.gov.au` returns 200; the transposed
-            // `https://api.data.abs.gov.au` used by index.ts fails DNS.
+            // `https://api.data.abs.gov.au` fails DNS. The MCP tool in
+            // src/server.ts used to use the transposed form; both now agree.
             expect(createConfig).toHaveBeenCalledWith(
                 expect.objectContaining({ baseURL: 'https://data.api.abs.gov.au' })
             );

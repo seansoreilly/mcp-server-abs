@@ -5,10 +5,14 @@ import axios, { AxiosError } from "axios";
 /**
  * Base URL of the ABS Data API.
  *
+ * Note the host order: `data.api.abs.gov.au`, not `api.data.abs.gov.au`. The
+ * transposed form does not resolve, and was what this tool requested until it
+ * was corrected — see `ABSApiClient.ts`, which has always used the right one.
+ *
  * Overridable through the environment so tests can point the server at a local
  * stub and exercise the upstream success and failure paths without network access.
  */
-const ABS_API_BASE = process.env.ABS_API_BASE ?? "https://api.data.abs.gov.au";
+const ABS_API_BASE = process.env.ABS_API_BASE ?? "https://data.api.abs.gov.au";
 
 /** A tool execution error: the model can read the message and retry. */
 function toolError(message: string) {
@@ -79,7 +83,9 @@ export function buildServer(): Server {
       return toolError("datasetId is required and must be a string");
     }
 
-    const url = `${ABS_API_BASE}/data/${args.datasetId}/all?format=json&dimensionAtObservation=AllDimensions`;
+    // SDMX REST: `/rest/data/{flow}/{key}`. The `/data/...` form this used to
+    // build returns 403 — the `/rest` prefix is not optional.
+    const url = `${ABS_API_BASE}/rest/data/${args.datasetId}/all?format=json&dimensionAtObservation=AllDimensions`;
 
     try {
       const response = await axios.get(url);

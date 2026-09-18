@@ -242,4 +242,16 @@ describe('MCP server (upstream ABS API succeeds)', () => {
 
         expect(requestedPaths.some((url) => url.includes('C21_G01_LGA'))).toBe(true);
     });
+
+    it('requests the SDMX data path the ABS API actually serves', async () => {
+        // The ABS endpoint is `/rest/data/{flow}/{key}` — verified live:
+        // `/rest/data/ABORIGINAL_POP_PROJ/all` returns 200, while the
+        // `/data/...` form this tool used to build returns 403. Asserted here
+        // because the stub answers any path, so nothing else would catch it.
+        await callTool(client, 'query_dataset', { datasetId: 'C21_G01_LGA' });
+
+        expect(requestedPaths.at(-1)).toMatch(
+            /^\/rest\/data\/C21_G01_LGA\/all\?/
+        );
+    });
 });
