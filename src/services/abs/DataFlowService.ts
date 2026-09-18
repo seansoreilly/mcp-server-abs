@@ -63,13 +63,12 @@ export class DataFlowService {
 
     private async fetchDataFlows(): Promise<DataFlow[]> {
         logger.info('Fetching data flows');
-        try {
-            const parsed = await this.apiClient.getDataFlows();
-            return this.extractDataFlows(parsed);
-        } catch (error) {
-            logger.error('Error fetching data flows', { error });
-            throw error;
-        }
+        // No try/catch: a failure here is already logged by the API client's
+        // interceptor and again by the caller. Logging a third time at the
+        // point of rethrow turned one failure into several near-identical
+        // entries without adding context.
+        const parsed = await this.apiClient.getDataFlows();
+        return this.extractDataFlows(parsed);
     }
 
     private extractDataFlows(parsed: unknown): DataFlow[] {
