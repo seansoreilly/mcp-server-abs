@@ -1,53 +1,97 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { Client } from "@modelcontextprotocol/client";
-import { repoRoot } from './helpers.js';
+import { Client } from '@modelcontextprotocol/client';
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import {
+    repoRoot,
+    startStubAbsApi,
+    UNREACHABLE_API_BASE,
+    type StubAbsApi,
+} from './helpers.js';
+import type { CallToolResult } from '@modelcontextprotocol/client';
 
 /**
  * Black-box MCP protocol tests.
  *
- * `src/index.ts` calls `main()` at import time, so it cannot be unit tested.
- * Instead we spawn the built server exactly as a host would and speak MCP to it
- * over stdio. This also guards the stdio contract itself: if anything ever logs
- * to stdout, the JSON-RPC channel breaks and these tests fail.
+ * `src/index.ts` runs `main()` at import time, so it cannot be imported into a
+ * test. Instead we spawn the built server exactly as a host would and speak MCP
+ * to it over stdio. This also guards the stdio contract itself: if anything ever
+ * logs to stdout, the JSON-RPC channel breaks and these tests fail.
  *
- * The happy path of `query_dataset` is deliberately not tested — it calls a
- * hostname that does not resolve, so a passing network test would be a lie.
+ * The server reads `ABS_API_BASE` from its environment, so the suites below
+ * point it at a local stub rather than the real ABS API — that keeps the
+ * upstream success and failure paths deterministic and offline.
  */
 
 const serverEntry = path.join(repoRoot, 'build', 'index.js');
 
-let client: Client;
-let transport: StdioClientTransport;
+/** Spawns the built server with `env` applied and returns a connected client. */
+async function connectServer(env: Record<string, string> = {}): Promise<{
+    client: Client;
+    close: () => Promise<void>;
+}> {
+    const transport = new StdioClientTransport({
+        command: process.execPath,
+        args: [serverEntry],
+        env: { ...process.env, ...env } as Record<string, string>,
+    });
+    const client = new Client(
+        { name: 'abs-mcp-test-client', version: '0.0.0' },
+        { capabilities: {} }
+    );
+    await client.connect(transport);
+
+    return { client, close: () => client.close() };
+}
+
+/** `callTool` types its result loosely; the suites below assert on tool results. */
+async function callTool(
+    client: Client,
+    name: string,
+    args: Record<string, unknown>
+): Promise<CallToolResult> {
+    return (await client.callTool({ name, arguments: args })) as CallToolResult;
+}
+
+/** Concatenates the text blocks of a tool result for message assertions. */
+function resultText(result: CallToolResult): string {
+    return result.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map((block) => block.text)
+        .join('\n');
+}
 
 describe('MCP server (stdio)', () => {
+    let client: Client;
+    let close: () => Promise<void>;
+
     beforeAll(async () => {
         await expect(
             fs.access(serverEntry),
             'build/index.js is missing — run `npm run build` first (the test script does this for you)'
         ).resolves.toBeUndefined();
 
-        transport = new StdioClientTransport({
-            command: process.execPath,
-            args: [serverEntry],
-        });
-        client = new Client(
-            { name: 'abs-mcp-test-client', version: '0.0.0' },
-            { capabilities: {} }
-        );
-        await client.connect(transport);
+        ({ client, close } = await connectServer());
     });
 
     afterAll(async () => {
-        await client?.close();
+        await close?.();
     });
 
     it('completes the initialize handshake over stdio', () => {
         // `connect()` resolving means initialize succeeded and stdout carried
         // clean JSON-RPC with no log-line contamination.
         expect(client.getServerVersion()).toMatchObject({ name: 'abs-mcp-server' });
+    });
+
+    it('serves the legacy protocol era, not 2026-07-28', () => {
+        // The v2 SDK speaks the 2025-era protocol unless a server explicitly
+        // opts in via `serveStdio()` / `createMcpHandler()`. This pins that
+        // choice: it fails loudly if anyone later flips on the modern era,
+        // which would drop the `initialize` handshake these tests rely on.
+        expect(client.getProtocolEra()).toBe('legacy');
+        expect(client.getNegotiatedProtocolVersion()).toBe('2025-11-25');
     });
 
     it('advertises exactly one tool: query_dataset', async () => {
@@ -71,30 +115,131 @@ describe('MCP server (stdio)', () => {
         expect(properties.datasetId?.type).toBe('string');
     });
 
-    it('rejects an unknown tool name', async () => {
+    it('rejects an unknown tool name as a protocol error', async () => {
+        // Per the tools spec, an unknown tool is a *protocol* error: the model
+        // cannot fix it by retrying with different arguments, so it surfaces as
+        // a rejected JSON-RPC call rather than an `isError` result.
         await expect(
             client.callTool({ name: 'no_such_tool', arguments: {} })
         ).rejects.toThrow(/Unknown tool/);
     });
 
-    it('rejects a call with no datasetId', async () => {
-        await expect(
-            client.callTool({ name: 'query_dataset', arguments: {} })
-        ).rejects.toThrow(/datasetId is required/);
+    it('reports a missing datasetId as a tool execution error', async () => {
+        // Input validation is a *tool execution* error: it resolves with
+        // `isError: true` so the model can read the message and self-correct.
+        const result = await callTool(client, 'query_dataset', {});
+
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toMatch(/datasetId is required/);
     });
 
-    it('rejects a datasetId of the wrong type', async () => {
-        await expect(
-            client.callTool({ name: 'query_dataset', arguments: { datasetId: 42 } })
-        ).rejects.toThrow(/datasetId is required and must be a string/);
+    it('reports a datasetId of the wrong type as a tool execution error', async () => {
+        const result = await callTool(client, 'query_dataset', { datasetId: 42 });
+
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toMatch(/datasetId is required and must be a string/);
     });
 
-    it('survives a rejected call and keeps serving requests', async () => {
-        await expect(
-            client.callTool({ name: 'query_dataset', arguments: {} })
-        ).rejects.toThrow();
+    it('survives a failed call and keeps serving requests', async () => {
+        const result = await callTool(client, 'query_dataset', {});
+        expect(result.isError).toBe(true);
 
         const { tools } = await client.listTools();
         expect(tools).toHaveLength(1);
+    });
+});
+
+describe('MCP server (upstream ABS API unreachable)', () => {
+    let client: Client;
+    let close: () => Promise<void>;
+
+    beforeAll(async () => {
+        ({ client, close } = await connectServer({
+            ABS_API_BASE: UNREACHABLE_API_BASE,
+        }));
+    });
+
+    afterAll(async () => {
+        await close?.();
+    });
+
+    it('reports a connection failure as a tool execution error', async () => {
+        // ECONNREFUSED produces an AxiosError with no `response`, a different
+        // branch from an HTTP error status. Both must surface as `isError`.
+        const result = await callTool(client, 'query_dataset', {
+            datasetId: 'C21_G01_LGA',
+        });
+
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toMatch(/ECONNREFUSED|ABS API/i);
+    });
+});
+
+describe('MCP server (upstream ABS API returns 500)', () => {
+    let stub: StubAbsApi;
+    let client: Client;
+    let close: () => Promise<void>;
+
+    beforeAll(async () => {
+        stub = await startStubAbsApi((_req, res) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ message: 'upstream exploded' }));
+        });
+        ({ client, close } = await connectServer({ ABS_API_BASE: stub.baseUrl }));
+    });
+
+    afterAll(async () => {
+        await close?.();
+        await stub?.close();
+    });
+
+    it('reports an HTTP error status as a tool execution error', async () => {
+        // An AxiosError *with* a `response` — the other upstream branch.
+        const result = await callTool(client, 'query_dataset', {
+            datasetId: 'C21_G01_LGA',
+        });
+
+        expect(result.isError).toBe(true);
+        expect(resultText(result)).toMatch(/500/);
+    });
+});
+
+describe('MCP server (upstream ABS API succeeds)', () => {
+    const payload = { data: { dataSets: [{ series: {} }] } };
+    let stub: StubAbsApi;
+    let client: Client;
+    let close: () => Promise<void>;
+    let requestedPaths: string[];
+
+    beforeAll(async () => {
+        requestedPaths = [];
+        stub = await startStubAbsApi((req, res) => {
+            requestedPaths.push(req.url ?? '');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(payload));
+        });
+        ({ client, close } = await connectServer({ ABS_API_BASE: stub.baseUrl }));
+    });
+
+    afterAll(async () => {
+        await close?.();
+        await stub?.close();
+    });
+
+    it('returns the dataset payload as a successful tool result', async () => {
+        // The only test that proves the *working* path still works — every
+        // other case here exercises a failure mode.
+        const result = await callTool(client, 'query_dataset', {
+            datasetId: 'C21_G01_LGA',
+        });
+
+        expect(result.isError).toBeFalsy();
+        expect(JSON.parse(resultText(result))).toEqual(payload);
+    });
+
+    it('requests the dataset by id', async () => {
+        await callTool(client, 'query_dataset', { datasetId: 'C21_G01_LGA' });
+
+        expect(requestedPaths.some((url) => url.includes('C21_G01_LGA'))).toBe(true);
     });
 });
