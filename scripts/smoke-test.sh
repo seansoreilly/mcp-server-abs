@@ -28,10 +28,11 @@ if ! echo "$output" | grep -q '"serverInfo"'; then
     exit 1
 fi
 
-# Every line on stdout must be a JSON-RPC message; anything else is a log leak.
+# Every line on stdout must be a JSON object. Responses, notifications and
+# errors all qualify; a winston log line or a stray console.log does not.
 while IFS= read -r line; do
     [ -z "$line" ] && continue
-    if ! echo "$line" | grep -q '^{"result"\|^{"jsonrpc"\|^{"id"'; then
+    if ! echo "$line" | grep -q '^{'; then
         echo "FAIL: non-JSON-RPC line on stdout: $line" >&2
         exit 1
     fi
