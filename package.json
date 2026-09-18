@@ -22,10 +22,11 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "0.6.0",
     "axios": "^1.6.2",
     "fast-xml-parser": "^4.3.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@modelcontextprotocol/client": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.4",
