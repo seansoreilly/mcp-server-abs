@@ -13,8 +13,10 @@ import {
  *
  * Unlike `DataFlowService.test.ts`, this file does NOT mock `ABSApiClient` —
  * only axios is stubbed. That matters: the production `XMLParser` config and
- * the `DataFlowService` lookup path are both exercised for real, which is the
- * only way the `it.fails` guards below can flip when the bugs are fixed.
+ * the `DataFlowService` lookup path are both exercised for real. These
+ * assertions previously carried `it.fails` guards for two extraction bugs
+ * (missing `removeNSPrefix`, and a lookup path one level too shallow); both
+ * are fixed, so the guards are gone and these now assert real behaviour.
  */
 
 const mockLogger = createMockLogger();
@@ -71,7 +73,7 @@ describe('dataflow extraction from the captured ABS response', () => {
         expect(axiosStub.get).toHaveBeenCalledWith('/rest/dataflow', expect.anything());
     });
 
-    it.fails('extracts all 1208 dataflows', async () => {
+    it('extracts all 1208 dataflows', async () => {
         // KNOWN BUGS (#2, #3). Two independent defects, both required:
         //   1. ABSApiClient.ts:19-23 omits `removeNSPrefix: true`, so every key
         //      keeps its `message:` / `structure:` / `common:` prefix.
@@ -87,7 +89,7 @@ describe('dataflow extraction from the captured ABS response', () => {
         expect(flows).toHaveLength(FIXTURE_FLOW_COUNT);
     });
 
-    it.fails('populates id, name and description on the first dataflow', async () => {
+    it('populates id, name and description on the first dataflow', async () => {
         // KNOWN BUGS (#2, #3): resolved by the same two changes as above.
         const service = new DataFlowService(cacheFile, 24);
 
@@ -101,7 +103,7 @@ describe('dataflow extraction from the captured ABS response', () => {
         expect(first.description).not.toBe('');
     });
 
-    it.fails('attaches the datastructure reference from Structure > Ref', async () => {
+    it('attaches the datastructure reference from Structure > Ref', async () => {
         // KNOWN BUGS (#2, #3): resolved by the same two changes as above.
         const service = new DataFlowService(cacheFile, 24);
 
@@ -114,7 +116,7 @@ describe('dataflow extraction from the captured ABS response', () => {
         });
     });
 
-    it.fails('never reports success with an empty result set', async () => {
+    it('never reports success with an empty result set', async () => {
         // KNOWN BUG (#2): the `|| []` fallback at DataFlowService.ts:76 turns a
         // failed lookup into a successful empty response, so a caller cannot
         // tell "no dataflows" from "parsing broke". Fix: assert a non-empty

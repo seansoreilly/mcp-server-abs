@@ -33,6 +33,7 @@ export function buildServer(): Server {
   const server = new Server(
     {
       name: "abs-mcp-server",
+      title: "Australian Bureau of Statistics",
       version: "0.1.0",
       description: "Access Australian Bureau of Statistics (ABS) data"
     },
@@ -48,6 +49,7 @@ export function buildServer(): Server {
       tools: [
         {
           name: "query_dataset",
+          title: "Query ABS Dataset",
           description: "Query a specific ABS dataset with optional filters",
           inputSchema: {
             type: "object",
@@ -57,6 +59,24 @@ export function buildServer(): Server {
                 type: "string",
                 description: "ID of the dataset to query (e.g., C21_G01_LGA)"
               }
+            }
+          },
+          // A read-only fetch against a third-party API: safe to retry, and
+          // its result depends on data outside this server's control.
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true
+          },
+          outputSchema: {
+            type: "object",
+            required: ["datasetId", "data", "sourceUrl"],
+            additionalProperties: false,
+            properties: {
+              datasetId: { type: "string" },
+              data: { type: "object" },
+              sourceUrl: { type: "string", format: "uri" }
             }
           }
         }
@@ -84,16 +104,40 @@ export function buildServer(): Server {
     }
 
     // SDMX REST: `/rest/data/{flow}/{key}`. The `/data/...` form this used to
-    // build returns 403 — the `/rest` prefix is not optional.
-    const url = `${ABS_API_BASE}/rest/data/${args.datasetId}/all?format=json&dimensionAtObservation=AllDimensions`;
+    // build returns 403 — the `/rest` prefix is not optional. The id is
+    // encoded so a value containing `,` `?` or `#` stays one path segment
+    // instead of injecting a query string.
+    const datasetId = args.datasetId;
+    const url = `${ABS_API_BASE}/rest/data/${encodeURIComponent(datasetId)}/all?format=json&dimensionAtObservation=AllDimensions`;
 
     try {
       const response = await axios.get(url);
+
+      // The declared `outputSchema` promises `data` is an object, so a body
+      // that parses to null, an array, or a scalar cannot be returned as a
+      // success — it would violate the contract clients validate against.
+      const data: unknown = response.data;
+      if (data === null || typeof data !== "object" || Array.isArray(data)) {
+        return toolError(
+          `ABS API did not return a JSON object for ${datasetId}: received ${Array.isArray(data) ? "an array" : typeof data}`
+        );
+      }
+
+      const structuredContent = { datasetId, data, sourceUrl: url };
       return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(response.data, null, 2)
-        }]
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(structuredContent, null, 2)
+          },
+          {
+            type: "resource_link",
+            uri: url,
+            name: datasetId,
+            mimeType: "application/vnd.sdmx.data+json"
+          }
+        ],
+        structuredContent
       };
     } catch (error) {
       // Upstream failures are tool execution errors too. Both axios branches

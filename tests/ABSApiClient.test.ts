@@ -200,7 +200,7 @@ describe('ABSApiClient', () => {
             expect(result).toBe(body);
         });
 
-        it.fails('returns JSON responses as objects, not XML-parsed junk', async () => {
+        it('returns JSON responses as objects, not XML-parsed junk', async () => {
             // KNOWN BUG (#4, ABSApiClient.ts:98-100): the format defaults to
             // `jsondata` and the Accept header asks for JSON, but the CSV
             // short-circuit only covers `csv*`, so a JSON body is handed to
