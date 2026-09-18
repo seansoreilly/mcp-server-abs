@@ -2,11 +2,17 @@
 
 **Researched:** 2026-09-18 · **Scope:** what changed between what `abs-mcp-server` implements today and the current MCP specification and TypeScript SDK.
 
-This is a research note, not a change request. Nothing in the repo has been modified. Sources are listed at the bottom; every claim below was checked against the specification changelogs or the SDK source rather than recalled.
+Originally a research note with no code changes. Sources are listed at the bottom; every claim below was checked against the specification changelogs or the SDK source rather than recalled.
+
+> **Updated 2026-09-18, after the migration.** The server has since been migrated to SDK v2
+> on the legacy protocol era, and all three findings in §5 are fixed. The note is kept in
+> its original analytical form — the reasoning is what justifies the changes — with
+> `Resolved` callouts marking what was done. §1 below describes the **pre-migration**
+> baseline the analysis started from, not the current state; see §6 for where things stand now.
 
 ---
 
-## 1. Baseline — what this repo implements today
+## 1. Baseline — what this repo implemented before the migration
 
 | Aspect | Current state |
 | --- | --- |
@@ -147,7 +153,11 @@ On a 2026-pinned connection, `getClientCapabilities()` and `getClientVersion()` 
 
 ## 5. Impact on this repo
 
-Two pre-existing issues surfaced while checking the baseline against the spec. **Both are noted, not fixed** — no code was changed.
+Three pre-existing issues surfaced while checking the baseline against the spec.
+
+> **Status update.** All three were **fixed** in the SDK v2 migration (branch
+> `worktree-mcp-v2-migration`). The findings are kept below as written, because the
+> reasoning is what justifies the changes; each carries a note on how it was resolved.
 
 **a) The declared capabilities shape is not a spec shape.** `src/index.ts:20-26` declares:
 
@@ -157,9 +167,41 @@ capabilities: { tools: { list: true, call: true } }
 
 The specification's `ServerCapabilities.tools` defines only `listChanged?: boolean` — verified against the official `schema/2025-11-25/schema.ts`, and this has been true in every revision including our `2024-11-05` baseline. `list` and `call` are not spec fields; they are silently ignored. The correct declaration for a server with a static tool list is `tools: {}`. This is currently harmless — tool listing and calling work because the handlers are registered, not because of these flags — but it would mislead anyone reading it as the source of truth.
 
+> **Resolved.** Now `tools: {}`. Worth noting empirically: under v2 this stopped being
+> a silent no-op and became a hard compile error —
+> `TS2353: Object literal may only specify known properties, and 'list' does not exist in type '{ listChanged?: boolean }'`
+> — which is a neat confirmation of the finding from the SDK's own type definitions.
+
 **b) `description` on the server info object.** `src/index.ts:17` passes `description` in the `Implementation` object. That field was only added to the spec in **2025-11-25** (minor change #2), so under our `2024-11-05` baseline it is not a spec field. What a 2024-era client does with it is client-dependent — this was not verified against a live client, and no behaviour should be assumed either way. It becomes legitimate once the SDK is upgraded; no change needed now.
 
-**c) Error handling is the wrong shape for modern clients.** `src/index.ts:50-95` throws on bad input (`"datasetId is required and must be a string"`) and on ABS API failures, which surfaces as a **protocol error**. Input validation failures should instead be returned as **tool execution errors** — `{ content: [...], isError: true }` — precisely so the model can read the message and self-correct. Note the mechanism is not new: `isError` on `CallToolResult` predates our baseline. 2025-11-25 merely *clarified* that validation errors belong there rather than in protocol errors (SEP-1303), so this was always available to us. As written, a model that calls `query_dataset` with a bad `datasetId` gets a protocol-level failure it cannot recover from gracefully. This is the highest-value behavioural fix available, and it is independent of any SDK upgrade.
+> **Resolved by the upgrade itself.** v2 negotiates 2025-11-25, where `description` is a
+> real `Implementation` field, so it was kept as-is and is now legitimate.
+
+**c) Error handling is the wrong shape for modern clients.** `src/index.ts:50-95` throws on every failure — unknown tool, bad input, and ABS API errors alike — so all three surface as **protocol errors**. Only the first belongs there.
+
+The spec's "Error Handling" section for tools defines two distinct mechanisms:
+
+> 1. **Protocol Errors**: Standard JSON-RPC errors for issues like: Unknown tools; Malformed requests (requests that fail to satisfy [CallToolRequest schema]); Server errors
+> 2. **Tool Execution Errors**: Reported in tool results with `isError: true`: API failures; Input validation errors (e.g., date in wrong format, value out of range); Business logic errors
+
+and explains why the split matters: "**Tool Execution Errors** contain actionable feedback that language models can use to self-correct and retry with adjusted parameters. **Protocol Errors** indicate issues with the request structure itself that models are less likely to be able to fix."
+
+The tempting misreading is that a missing `datasetId` is a "malformed request". It is not: "malformed" refers to the **`CallToolRequest`** envelope (`{name, arguments?}`), which `{name: 'query_dataset', arguments: {}}` satisfies. A missing `datasetId` fails the *tool's own* `inputSchema`, and input validation is listed explicitly under tool execution errors — the spec's own `isError` example is itself a validation case. The v2 SDK settles it by convention too: on an input-schema failure `registerTool` returns "an ordinary tool result with `isError: true`, so the model reads the message and retries with arguments that fit the schema."
+
+So the correct mapping is:
+
+| Site | Condition | Mechanism |
+|---|---|---|
+| `src/index.ts:55` | unknown tool name | protocol error (`InvalidParams`) |
+| `src/index.ts:59` | missing / non-string `datasetId` | `isError: true` |
+| `src/index.ts:72-77` | ABS API call failed | `isError: true` |
+
+The mechanism is not new: `isError` on `CallToolResult` predates our baseline, and 2025-11-25 merely *clarified* where validation errors belong (SEP-1303). It was always available to us. This is the highest-value behavioural fix available and is independent of any SDK upgrade.
+
+> **Resolved**, exactly as the table above specifies. This is a **breaking change to the
+> error contract**: callers that wrapped `callTool` in `try/catch` no longer see invalid
+> arguments or API failures as exceptions and must read `result.isError`. Both axios
+> branches are covered (HTTP status vs. transport failure), each with its own test.
 
 ### Things we'd gain, roughly in value order
 
@@ -173,14 +215,41 @@ The specification's `ServerCapabilities.tools` defines only `listChanged?: boole
 ### Upgrade paths
 
 - **Do nothing.** The server keeps working. The 2025 era is not removed, and `2024-11-05` remains in `SUPPORTED_PROTOCOL_VERSIONS`. `resultType` omission is explicitly handled by clients. Lowest risk, and nothing forces our hand yet.
-- **Minimal (recommended first step).** Stay on the low-level `Server`, move to SDK v1 `1.30.0`, fix the capabilities shape, convert throws to `isError` tool results, add annotations, `title`, and `outputSchema`. Meaningful client-visible improvement, small blast radius, no era change.
-- **Full v2.** Run the codemod, move to `@modelcontextprotocol/server` 2.0.0, and opt into 2026-07-28 via `serveStdio(() => buildServer())`. Requires Node 20+ and a deliberate switch from a module-scope singleton server (`src/index.ts:13`) to a per-connection factory. Worth doing when there's a reason to speak the modern era — not before.
+- **Minimal.** Stay on the low-level `Server`, move to SDK v1 `1.30.0`, fix the capabilities shape, convert throws to `isError` tool results, add annotations, `title`, and `outputSchema`. Meaningful client-visible improvement, small blast radius, no era change.
+- **v2 on the legacy era ← taken.** Run the codemod, move to `@modelcontextprotocol/server` 2.0.0, and keep serving the 2025 era. **This does not require opting into 2026-07-28**: v2 negotiates 2025-11-25 through the ordinary `initialize` handshake by default, so the wire protocol moves forward four revisions while staying compatible with every client that exists today. Requires Node 20+.
+- **v2 on the modern era.** The above, plus `serveStdio(() => buildServer())` to serve 2026-07-28. Needs a per-connection factory rather than a module-scope singleton — which is why `buildServer()` was extracted, making this a small change rather than a rewrite. Worth doing when there's a reason to speak the modern era; there isn't one yet.
 
-A note on ordering: the minimal path is a strict subset of the work the full path needs anyway, so doing it first costs nothing in rework.
+> **What was done (branch `worktree-mcp-v2-migration`).** The third path: SDK v2 on the
+> legacy era, plus all three fixes from §5. The fourth path is deliberately left for later.
+> An integration test pins `getProtocolEra() === 'legacy'` and the negotiated version at
+> `2025-11-25`, so an accidental era switch fails the build.
+
+A note on ordering: each path is a strict subset of the next, so taking them in order costs nothing in rework.
 
 ---
 
-## 6. Sources
+## 6. Where things stand now (post-migration)
+
+| Aspect | State |
+| --- | --- |
+| SDK | `@modelcontextprotocol/server` `2.0.0` (dep), `@modelcontextprotocol/client` `2.0.0` (devDep, tests only) |
+| Protocol revision | `2025-11-25`, negotiated via the legacy `initialize` handshake — pinned by a test |
+| Protocol era | `legacy`. 2026-07-28 is **not** served; that remains an explicit opt-in |
+| API style | Low-level `Server` + `setRequestHandler('tools/list' \| 'tools/call', …)` — `src/server.ts` |
+| Entry point | `buildServer()` factory in `src/server.ts`; `src/index.ts` runs `main()` only |
+| Transport | stdio, `StdioServerTransport` (still supported in v2) |
+| Errors | Unknown tool → `ProtocolError(InvalidParams)`; invalid args and API failures → `isError: true` |
+| Surface | Unchanged: one tool, `query_dataset` |
+
+Node 20+ is now required (`engines.node >= 20` on the v2 packages).
+
+**Not done, deliberately:** `outputSchema`/`structuredContent`, tool annotations, `title`,
+resource links, and the modern era — items 2–6 of the gains list above. Each is independent
+of this migration and can be taken separately.
+
+---
+
+## 7. Sources
 
 All fetched or queried 2026-09-18.
 
@@ -209,6 +278,12 @@ All fetched or queried 2026-09-18.
 - `npm view @modelcontextprotocol/sdk version` → `1.30.0`
 - `npm view @modelcontextprotocol/server version` → `2.0.0`
 - `npm view @modelcontextprotocol/sdk@1.30.0 readme` — used to verify the v1-line feature claims in §4
+
+**Added during the migration:**
+
+- `specification/2025-11-25/server/tools` §"Error Handling" — the two-mechanism split quoted in §5(c)
+- `ts.sdk.modelcontextprotocol.io/v2/servers/tools` — v2 returns `isError` on input-schema failure
+- `node_modules/@modelcontextprotocol/client/dist/index.d.mts` — `getProtocolEra()`, `getNegotiatedProtocolVersion()`, `getServerVersion()` all confirmed present in v2
 
 ### A caveat on freshness
 
