@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // This config never emits, so the base `rootDir` (./src) would only serve
+    // to reject the test files. Widen it to the repo root.
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*", "tests/**/*", "vitest.config.ts"]
+}
