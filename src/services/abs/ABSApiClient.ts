@@ -101,7 +101,10 @@ export class ABSApiClient {
         if (contentType.includes('csv') || (!contentType && format.startsWith('csv'))) {
             return response.data;
         }
-        if (contentType.includes('json') || (!contentType && format === 'jsondata')) {
+        // Prefer the declared content type. Without one, sniff the body rather
+        // than trusting `format`: `jsondata` is the default, so keying off it
+        // would send an XML body down the JSON path.
+        if (contentType.includes('json') || (!contentType && this.looksLikeJson(response.data))) {
             const data: unknown = typeof response.data === 'string'
                 ? JSON.parse(response.data)
                 : response.data;
@@ -111,6 +114,22 @@ export class ABSApiClient {
             return data;
         }
         return this.parseXml(response.data);
+    }
+
+    /**
+     * Whether a body looks like JSON, used only when the response carries no
+     * `content-type`. A JSON document must start with `{` or `[`; anything
+     * else (notably an XML document) goes to the XML parser.
+     */
+    private looksLikeJson(data: unknown): boolean {
+        if (typeof data === 'object' && data !== null) {
+            return true;
+        }
+        if (typeof data !== 'string') {
+            return false;
+        }
+        const trimmed = data.trimStart();
+        return trimmed.startsWith('{') || trimmed.startsWith('[');
     }
 
     private parseXml(data: unknown): unknown {

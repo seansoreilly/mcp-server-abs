@@ -13,8 +13,10 @@ import {
  *
  * Unlike `DataFlowService.test.ts`, this file does NOT mock `ABSApiClient` —
  * only axios is stubbed. That matters: the production `XMLParser` config and
- * the `DataFlowService` lookup path are both exercised for real, which is the
- * only way the `it.fails` guards below can flip when the bugs are fixed.
+ * the `DataFlowService` lookup path are both exercised for real. These
+ * assertions previously carried `it.fails` guards for two extraction bugs
+ * (missing `removeNSPrefix`, and a lookup path one level too shallow); both
+ * are fixed, so the guards are gone and these now assert real behaviour.
  */
 
 const mockLogger = createMockLogger();

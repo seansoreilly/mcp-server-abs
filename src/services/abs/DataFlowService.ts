@@ -73,11 +73,18 @@ export class DataFlowService {
         logger.debug('Extracting data flows from parsed XML');
         const structure = asRecord(asRecord(parsed)?.Structure);
         const structures = asRecord(structure?.Structures);
-        const dataflows = asRecord(structures?.Dataflows)?.Dataflow;
-        const flows: unknown[] = Array.isArray(dataflows) ? dataflows : dataflows == null ? [] : [dataflows];
-        if (flows.length === 0) {
-            throw new Error('ABS API response contains no dataflows');
+        const dataflowsContainer = asRecord(structures?.Dataflows);
+        // Distinguish "the lookup path is missing" (parsing broke — the bug
+        // this guards against) from "the list is present but empty" (a
+        // legitimate zero-result response). Only the former is an error;
+        // collapsing both into a throw would reject valid empty responses.
+        if (dataflowsContainer === undefined) {
+            throw new Error(
+                'ABS API response contains no Structure.Structures.Dataflows — the payload shape is not what the parser expects'
+            );
         }
+        const dataflows = dataflowsContainer.Dataflow;
+        const flows: unknown[] = Array.isArray(dataflows) ? dataflows : dataflows == null ? [] : [dataflows];
 
         return flows.map((value): DataFlow => {
             const flow = asRecord(value);

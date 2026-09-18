@@ -62,6 +62,18 @@ function resultText(result: CallToolResult): string {
         .join('\n');
 }
 
+/** The shape `query_dataset` declares in its `outputSchema`. */
+interface QueryDatasetOutput {
+    datasetId: string;
+    data: unknown;
+    sourceUrl: string;
+}
+
+/** `structuredContent` is typed as an open record; narrow it to the contract. */
+function structured(result: CallToolResult): QueryDatasetOutput | undefined {
+    return result.structuredContent as QueryDatasetOutput | undefined;
+}
+
 describe('MCP server (stdio)', () => {
     let client: Client;
     let close: () => Promise<void>;
@@ -271,7 +283,7 @@ describe('MCP server (upstream ABS API succeeds)', () => {
         expect(result.content.find((block) => block.type === 'resource_link')).toMatchObject({
             type: 'resource_link',
             name: 'C21_G01_LGA',
-            uri: result.structuredContent?.sourceUrl,
+            uri: structured(result)?.sourceUrl,
             mimeType: 'application/vnd.sdmx.data+json',
         });
     });
