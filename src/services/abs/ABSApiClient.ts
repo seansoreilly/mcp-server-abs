@@ -1,12 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
-import type {
-    ABSError,
-    DataFormat,
-    DataQueryOptions,
-    DetailLevel,
-    ReferenceScope,
-} from '../../types/abs.js';
+import type { DataFormat, DataQueryOptions, DetailLevel, ReferenceScope } from '../../types/abs.js';
+import { ABSError } from '../../types/abs.js';
 import logger from '../../utils/logger.js';
 
 export class ABSApiClient {
@@ -40,8 +35,7 @@ export class ABSApiClient {
                 return response;
             },
             (error) => {
-                this.handleError(error);
-                throw error;
+                throw this.toAbsError(error);
             }
         );
     }
@@ -160,26 +154,29 @@ export class ABSApiClient {
         }
     }
 
-    private handleError(error: unknown): never {
-        const absError: ABSError = new Error('ABS API Error');
-
+    /**
+     * Converts an unknown thrown value into a structured {@link ABSError}.
+     *
+     * Returns rather than throws so callers read as `throw this.toAbsError(e)`
+     * — the previous `: never` signature made the `throw` that followed every
+     * call site unreachable.
+     */
+    private toAbsError(error: unknown): ABSError {
         if (axios.isAxiosError(error)) {
-            absError.message = error.message;
-            absError.status = error.response?.status;
-            absError.statusText = error.response?.statusText;
-            absError.url = error.config?.url;
-
             logger.error('ABS API Error', {
                 status: error.response?.status,
                 statusText: error.response?.statusText,
                 url: error.config?.url,
                 message: error.message,
             });
-        } else {
-            absError.message = error instanceof Error ? error.message : 'Unknown error';
-            logger.error('Unknown API Error', { error });
+            return new ABSError(error.message, {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+            });
         }
 
-        throw absError;
+        logger.error('Unknown API Error', { error });
+        return new ABSError(error instanceof Error ? error.message : 'Unknown error');
     }
 }

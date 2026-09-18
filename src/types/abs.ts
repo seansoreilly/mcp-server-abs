@@ -54,11 +54,33 @@ export interface DataQueryOptions {
     endPeriod?: string;
     format?: DataFormat;
     detail?: 'full' | 'dataonly' | 'serieskeysonly' | 'nodata';
-    dimensionAtObservation?: 'TIME_PERIOD' | 'AllDimensions' | string;
+    // `'A' | 'B' | string` collapses to plain `string`, losing both checking and
+    // autocomplete. `(string & {})` keeps the literals as hints while still
+    // accepting any dimension id the ABS API may define.
+    dimensionAtObservation?: 'TIME_PERIOD' | 'AllDimensions' | (string & {});
 }
 
-export interface ABSError extends Error {
-    status?: number;
-    statusText?: string;
-    url?: string;
+/**
+ * An error from the ABS API, carrying the HTTP context as structured fields.
+ *
+ * A real class rather than an interface over a plain `Error`: `instanceof`
+ * works, the shape is guaranteed by the constructor instead of by whoever
+ * remembered to assign the fields, and callers can branch on `status` rather
+ * than parsing it back out of a message string.
+ */
+export class ABSError extends Error {
+    readonly status?: number;
+    readonly statusText?: string;
+    readonly url?: string;
+
+    constructor(
+        message: string,
+        context: { status?: number; statusText?: string; url?: string } = {}
+    ) {
+        super(message);
+        this.name = 'ABSError';
+        this.status = context.status;
+        this.statusText = context.statusText;
+        this.url = context.url;
+    }
 }

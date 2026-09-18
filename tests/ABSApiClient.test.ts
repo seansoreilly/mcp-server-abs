@@ -1,5 +1,6 @@
 import type { AxiosRequestConfig } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ABSError } from '../src/types/abs.js';
 import { createMockLogger } from './helpers.js';
 
 const mockLogger = createMockLogger();
@@ -247,12 +248,11 @@ describe('ABSApiClient', () => {
                 thrown = error;
             }
 
-            const absError = thrown as Error & {
-                status?: number;
-                statusText?: string;
-                url?: string;
-            };
-            expect(absError).toBeInstanceOf(Error);
+            // `instanceof ABSError` is the point of making it a class: callers
+            // can branch on the type instead of duck-typing a plain Error.
+            expect(thrown).toBeInstanceOf(ABSError);
+            const absError = thrown as ABSError;
+            expect(absError.name).toBe('ABSError');
             expect(absError.status).toBe(404);
             expect(absError.statusText).toBe('Not Found');
             expect(absError.url).toBe('/rest/data/NOPE/all');

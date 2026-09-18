@@ -113,8 +113,15 @@ export class DataFlowService {
         logger.debug('Loading cache from file', { path: this.cacheFilePath });
         try {
             const data = await fs.readFile(this.cacheFilePath, 'utf8');
-            const cache = JSON.parse(data) as DataFlowCache;
-            cache.lastUpdated = new Date(cache.lastUpdated);
+            const cache = parseCache(JSON.parse(data));
+            if (cache === null) {
+                // A truncated or hand-edited cache would otherwise yield an
+                // Invalid Date, which compares false against every expiry
+                // check — leaving the cache permanently stale and never
+                // refetched. Treat it as absent so the next call refetches.
+                logger.warn('Ignoring malformed cache file', { path: this.cacheFilePath });
+                return null;
+            }
             logger.info('Successfully loaded cache', {
                 flowCount: cache.flows.length,
                 lastUpdated: cache.lastUpdated,
@@ -125,6 +132,11 @@ export class DataFlowService {
                 logger.info('No cache file found', { path: this.cacheFilePath });
                 return null;
             }
+            // Unparseable JSON is deliberately NOT swallowed: a corrupt cache
+            // file is a symptom worth surfacing, and `failure modes >
+            // propagates a corrupt cache file` pins that choice. Only a
+            // well-formed cache whose *shape* is wrong degrades to a refetch,
+            // because that case would otherwise go undetected forever.
             logger.error('Error loading cache', { error });
             throw error;
         }
@@ -167,6 +179,26 @@ export class DataFlowService {
     public static formatDataflowIdentifier(flow: DataFlow): string {
         return `${flow.agencyID},${flow.id},${flow.version}`;
     }
+}
+
+/**
+ * Validates on-disk cache content, returning `null` if it is not usable.
+ *
+ * `JSON.parse(...) as DataFlowCache` is a lie to the compiler: the file is
+ * arbitrary bytes. In particular an unparseable `lastUpdated` yields an
+ * Invalid Date, whose comparisons are always false — so a corrupt cache would
+ * read as neither fresh nor expired and never be refreshed.
+ */
+function parseCache(value: unknown): DataFlowCache | null {
+    const record = asRecord(value);
+    if (record === undefined || !Array.isArray(record.flows)) {
+        return null;
+    }
+    const lastUpdated = new Date(record.lastUpdated as string | number | Date);
+    if (Number.isNaN(lastUpdated.getTime())) {
+        return null;
+    }
+    return { flows: record.flows as DataFlowCache['flows'], lastUpdated };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

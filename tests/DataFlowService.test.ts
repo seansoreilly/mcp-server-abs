@@ -86,6 +86,27 @@ describe('DataFlowService', () => {
             expect(getDataFlows).not.toHaveBeenCalled();
         });
 
+        it.each([
+            ['an unparseable lastUpdated', '{"flows":[],"lastUpdated":"not-a-date"}'],
+            ['a missing flows array', '{"lastUpdated":"2025-01-01T00:00:00.000Z"}'],
+            ['a JSON scalar', '42'],
+        ])('refetches rather than trusting %s', async (_label, contents) => {
+            // These parse fine but are the wrong *shape*. An Invalid Date
+            // compares false against every expiry check, so without validation
+            // such a cache reads as neither fresh nor stale and is never
+            // refreshed — a silent permanent staleness. Falling through to the
+            // API is the safe reading. (Unparseable JSON is a different case
+            // and deliberately still throws — see `failure modes` below.)
+            await fs.mkdir(path.dirname(cacheFile), { recursive: true });
+            await fs.writeFile(cacheFile, contents, 'utf8');
+            getDataFlows.mockResolvedValue(parsedResponse(SAMPLE_FLOWS));
+            const service = new DataFlowService(cacheFile, 24);
+
+            await service.getDataFlows();
+
+            expect(getDataFlows).toHaveBeenCalled();
+        });
+
         it('revives lastUpdated as a Date when loading from disk', async () => {
             const when = new Date('2025-01-01T00:00:00.000Z');
             await writeCache({ lastUpdated: when, flows: SAMPLE_FLOWS });
