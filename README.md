@@ -27,6 +27,11 @@ section below as a description of the service layer, not of the tool surface.
 | `ABS_API_BASE` | `https://data.api.abs.gov.au` | ABS API origin; override to point at a stub |
 | `ABS_LOG_LEVEL` | `debug` | Winston log level |
 | `ABS_LOG_DIR` | `<cwd>/logs` | Directory for log files |
+| `ABS_CACHE_FILE` | `<build>/../cache/dataflows.json` | Where the dataflow cache is written |
+| `ABS_CACHE_REFRESH_HOURS` | `24` | How long a cached dataflow list stays fresh |
+| `ABS_REQUEST_TIMEOUT_MS` | `30000` | Request timeout for ABS API calls |
+
+The ABS Data API is open — the server needs **no API key or credentials**.
 
 All logging goes to **stderr**, never stdout — stdout carries the MCP JSON-RPC channel.
 
@@ -35,6 +40,50 @@ All logging goes to **stderr**, never stdout — stdout carries the MCP JSON-RPC
 ```bash
 npm install
 ```
+
+## Docker
+
+A container image is published to GitHub Container Registry on every push to
+`main`, tagged `latest`, `main`, `sha-<commit>`, and — for `v*` tags — the
+semver version.
+
+```bash
+docker pull ghcr.io/seansoreilly/mcp-server-abs:latest
+docker run -i --rm ghcr.io/seansoreilly/mcp-server-abs:latest
+```
+
+`-i` is required: the server speaks MCP over stdio, so stdin and stdout are the
+transport. There is no port to publish and no HTTP endpoint to health-check.
+
+The image runs as the unprivileged `node` user and writes its logs and dataflow
+cache to `/data`. Mount a volume there to keep the cache across restarts:
+
+```bash
+docker run -i --rm -v abs-mcp-data:/data ghcr.io/seansoreilly/mcp-server-abs:latest
+```
+
+Every variable in [Configuration](#configuration) can be passed with `-e`; the
+image presets `ABS_CACHE_FILE=/data/dataflows.json` and `ABS_LOG_DIR=/data/logs`.
+
+```bash
+docker run -i --rm -e ABS_LOG_LEVEL=info -e ABS_CACHE_REFRESH_HOURS=6 \
+  ghcr.io/seansoreilly/mcp-server-abs:latest
+```
+
+To build locally instead of pulling:
+
+```bash
+docker build -t abs-mcp-server .
+./scripts/smoke-test.sh abs-mcp-server   # drives an MCP initialize over stdio
+```
+
+### As a sidecar
+
+Because the transport is stdio rather than a socket, an agent framework runs
+the container as a child process and speaks to it over the pipe — it is not a
+network service. In Kubernetes or Compose, a true sidecar needs a supervising
+process that owns the pipes; the common case is a host process spawning
+`docker run -i --rm ...` per session.
 
 ## Development
 
@@ -110,10 +159,40 @@ Winston, configured for an stdio MCP server:
 
 ## Integration with Claude Desktop
 
-1. Close Claude Desktop if it's running
-2. Start the ABS MCP server: `npm start`
-3. Start Claude Desktop
-4. The ABS tools should appear in the "Available MCP Tools" window
+Claude Desktop spawns the server itself, so point it at either the built entry
+point or the container. Add one of these to `claude_desktop_config.json`, then
+restart Claude Desktop — the ABS tools appear in the "Available MCP Tools"
+window.
+
+Local build (run `npm run build` first):
+
+```json
+{
+  "mcpServers": {
+    "abs": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp-server-abs/build/index.js"]
+    }
+  }
+}
+```
+
+Container:
+
+```json
+{
+  "mcpServers": {
+    "abs": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "abs-mcp-data:/data",
+        "ghcr.io/seansoreilly/mcp-server-abs:latest"
+      ]
+    }
+  }
+}
+```
 
 ## API Documentation
 

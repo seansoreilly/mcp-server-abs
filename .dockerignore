@@ -1,0 +1,20 @@
+.git
+.gitignore
+.github
+.claude
+node_modules
+build
+dist
+logs
+cache
+tests
+agent_docs
+*.md
+biome.json
+tsconfig.test.json
+vitest.config.ts
+# 3.5 MB captured SDMX-ML response; a test fixture, read by no source file.
+dataflows.xml
+.env*
+*.log
+*.tsbuildinfo
