@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import { createServer, type IncomingMessage, type ServerResponse } from 'http';
 import { fileURLToPath } from 'url';
 import { vi } from 'vitest';
 
@@ -67,3 +68,49 @@ export function createMockLogger(): MockLogger {
         error: vi.fn(),
     };
 }
+
+/** A running stub of the ABS API, and the handle to shut it down. */
+export interface StubAbsApi {
+    /** Origin to hand the server as `ABS_API_BASE`, e.g. `http://127.0.0.1:53124`. */
+    baseUrl: string;
+    close: () => Promise<void>;
+}
+
+/**
+ * Starts a throwaway HTTP server standing in for the ABS API.
+ *
+ * `src/index.ts` reads its base URL from `ABS_API_BASE`, so pointing a spawned
+ * server at one of these makes both the upstream-failure and success paths
+ * deterministic: no network, no DNS, and no dependence on
+ * api.data.abs.gov.au being reachable from the machine running the tests.
+ *
+ * Binds an ephemeral port (`listen(0)`) so parallel workers never collide.
+ */
+export async function startStubAbsApi(
+    handler: (req: IncomingMessage, res: ServerResponse) => void
+): Promise<StubAbsApi> {
+    const server = createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+        throw new Error('stub ABS API did not bind to a TCP port');
+    }
+
+    return {
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        close: () =>
+            new Promise<void>((resolve, reject) => {
+                server.close((error) => (error ? reject(error) : resolve()));
+            }),
+    };
+}
+
+/**
+ * A base URL that always refuses connections.
+ *
+ * Port 1 on loopback is reserved and never bound, so requests fail immediately
+ * with ECONNREFUSED. That is the `AxiosError`-without-a-`response` branch,
+ * which the server handles separately from an HTTP error status.
+ */
+export const UNREACHABLE_API_BASE = 'http://127.0.0.1:1';
