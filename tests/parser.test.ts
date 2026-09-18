@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest';
 import { XMLParser } from 'fast-xml-parser';
-import {
-    loadDataflowsXml,
-    FIXTURE_FLOW_COUNT,
-    FIXTURE_FIRST_FLOW,
-} from './helpers.js';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { FIXTURE_FIRST_FLOW, FIXTURE_FLOW_COUNT, loadDataflowsXml } from './helpers.js';
 
 /**
  * Characterisation tests for the SDMX-ML payload itself.

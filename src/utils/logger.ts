@@ -1,6 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import winston from 'winston';
-import path from 'path';
-import fs from 'fs';
 
 /** Where log files are written. Absolute, so transports never depend on cwd. */
 const logsDir = process.env.ABS_LOG_DIR ?? path.join(process.cwd(), 'logs');
@@ -21,10 +21,7 @@ const ALL_LEVELS_TO_STDERR = Object.keys(winston.config.npm.levels);
 
 const logger = winston.createLogger({
     level: process.env.ABS_LOG_LEVEL ?? 'debug',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.json()
-    ),
+    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
     transports: [
         new winston.transports.File({
             filename: path.join(logsDir, 'abs-error.log'),
@@ -50,9 +47,9 @@ const logger = winston.createLogger({
                     }
                     return msg;
                 })
-            )
-        })
-    ]
+            ),
+        }),
+    ],
 });
 
 export default logger;

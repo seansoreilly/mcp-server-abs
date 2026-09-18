@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AxiosRequestConfig } from 'axios';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockLogger } from './helpers.js';
 
 const mockLogger = createMockLogger();
@@ -222,7 +222,10 @@ describe('ABSApiClient', () => {
 
     describe('error handling', () => {
         /** Invokes the rejection half of the registered response interceptor. */
-        function triggerInterceptor(client: InstanceType<typeof ABSApiClient>, error: unknown): unknown {
+        function triggerInterceptor(
+            client: InstanceType<typeof ABSApiClient>,
+            error: unknown
+        ): unknown {
             void client;
             const handlers = axiosStub.interceptors.response.use.mock.calls.at(-1);
             const onRejected = handlers?.[1] as ErrorHandler;
@@ -287,10 +290,7 @@ describe('ABSApiClient', () => {
             }
 
             expect((thrown as Error).message).toBe('socket hang up');
-            expect(mockLogger.error).toHaveBeenCalledWith(
-                'Unknown API Error',
-                expect.anything()
-            );
+            expect(mockLogger.error).toHaveBeenCalledWith('Unknown API Error', expect.anything());
         });
 
         it('rejects rather than resolving when the underlying request fails', async () => {

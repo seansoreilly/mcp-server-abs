@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'fs/promises';
-import path from 'path';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DataFlow, DataFlowCache } from '../src/types/abs.js';
 import { createMockLogger, makeTempDir } from './helpers.js';
 
@@ -318,9 +318,7 @@ describe('DataFlowService', () => {
 
     describe('formatDataflowIdentifier', () => {
         it('joins agency, id and version in SDMX order', () => {
-            expect(DataFlowService.formatDataflowIdentifier(SAMPLE_FLOWS[0])).toBe(
-                'ABS,CPI,1.0.0'
-            );
+            expect(DataFlowService.formatDataflowIdentifier(SAMPLE_FLOWS[0])).toBe('ABS,CPI,1.0.0');
         });
     });
 });

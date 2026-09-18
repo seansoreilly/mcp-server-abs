@@ -16,7 +16,7 @@ export interface DataFlowCache {
     flows: DataFlow[];
 }
 
-export type DetailLevel = 
+export type DetailLevel =
     | 'full'
     | 'allstubs'
     | 'referencestubs'
@@ -24,7 +24,7 @@ export type DetailLevel =
     | 'allcompletestubs'
     | 'referencecompletestubs';
 
-export type ReferenceScope = 
+export type ReferenceScope =
     | 'none'
     | 'parents'
     | 'parentsandsiblings'
@@ -42,7 +42,7 @@ export type ReferenceScope =
     | 'categorisation'
     | 'hierarchicalcodelist';
 
-export type DataFormat = 
+export type DataFormat =
     | 'csvfilewithlabels'
     | 'csvfile'
     | 'jsondata'

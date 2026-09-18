@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import winston from 'winston';
 import logger from '../src/utils/logger.js';
 

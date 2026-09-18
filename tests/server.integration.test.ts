@@ -1,15 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import path from 'path';
-import fs from 'fs/promises';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { CallToolResult } from '@modelcontextprotocol/client';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
-import {
-    repoRoot,
-    startStubAbsApi,
-    UNREACHABLE_API_BASE,
-    type StubAbsApi,
-} from './helpers.js';
-import type { CallToolResult } from '@modelcontextprotocol/client';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { repoRoot, type StubAbsApi, startStubAbsApi, UNREACHABLE_API_BASE } from './helpers.js';
 
 /**
  * Black-box MCP protocol tests.
@@ -155,9 +150,9 @@ describe('MCP server (stdio)', () => {
         // Per the tools spec, an unknown tool is a *protocol* error: the model
         // cannot fix it by retrying with different arguments, so it surfaces as
         // a rejected JSON-RPC call rather than an `isError` result.
-        await expect(
-            client.callTool({ name: 'no_such_tool', arguments: {} })
-        ).rejects.toThrow(/Unknown tool/);
+        await expect(client.callTool({ name: 'no_such_tool', arguments: {} })).rejects.toThrow(
+            /Unknown tool/
+        );
     });
 
     it('reports a missing datasetId as a tool execution error', async () => {
@@ -308,15 +303,14 @@ describe('MCP server (upstream ABS API succeeds)', () => {
         // because the stub answers any path, so nothing else would catch it.
         await callTool(client, 'query_dataset', { datasetId: 'C21_G01_LGA' });
 
-        expect(requestedPaths.at(-1)).toMatch(
-            /^\/rest\/data\/C21_G01_LGA\/all\?/
-        );
+        expect(requestedPaths.at(-1)).toMatch(/^\/rest\/data\/C21_G01_LGA\/all\?/);
     });
 });
 
 describe('MCP server (invalid upstream JSON shape)', () => {
     it.each(['null', '[]', '42', '"text"', '<html>upstream error</html>'])(
-        'returns a tool error for %s without structured success data', async (body) => {
+        'returns a tool error for %s without structured success data',
+        async (body) => {
             const stub = await startStubAbsApi((_req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(body);
