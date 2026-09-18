@@ -4,7 +4,16 @@ import type { CallToolResult } from '@modelcontextprotocol/client';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { repoRoot, type StubAbsApi, startStubAbsApi, UNREACHABLE_API_BASE } from './helpers.js';
+import {
+    FIXTURE_FIRST_FLOW,
+    FIXTURE_FLOW_COUNT,
+    loadDataflowsXml,
+    makeTempDir,
+    repoRoot,
+    type StubAbsApi,
+    startStubAbsApi,
+    UNREACHABLE_API_BASE,
+} from './helpers.js';
 
 /**
  * Black-box MCP protocol tests.
@@ -101,10 +110,22 @@ describe('MCP server (stdio)', () => {
         expect(client.getNegotiatedProtocolVersion()).toBe('2025-11-25');
     });
 
-    it('advertises exactly one tool: query_dataset', async () => {
+    it('advertises query_dataset and list_dataflows', async () => {
         const { tools } = await client.listTools();
 
-        expect(tools.map((tool) => tool.name)).toEqual(['query_dataset']);
+        expect(tools.map((tool) => tool.name).sort()).toEqual(['list_dataflows', 'query_dataset']);
+    });
+
+    it('describes list_dataflows as a read-only discovery tool', async () => {
+        const { tools } = await client.listTools();
+        const tool = tools.find((candidate) => candidate.name === 'list_dataflows');
+
+        expect(tool).toMatchObject({
+            title: 'List ABS Dataflows',
+            annotations: { readOnlyHint: true, destructiveHint: false },
+        });
+        // Callers need a way to learn a valid datasetId; this is that way.
+        expect(tool?.description).toMatch(/datasetId|dataset id/i);
     });
 
     it('describes the query_dataset input schema', async () => {
@@ -175,8 +196,10 @@ describe('MCP server (stdio)', () => {
         const result = await callTool(client, 'query_dataset', {});
         expect(result.isError).toBe(true);
 
+        // The point is that the connection survives, not the tool count —
+        // which the dedicated advertisement test above already pins.
         const { tools } = await client.listTools();
-        expect(tools).toHaveLength(1);
+        expect(tools.map((tool) => tool.name)).toContain('query_dataset');
     });
 });
 
@@ -304,6 +327,67 @@ describe('MCP server (upstream ABS API succeeds)', () => {
         await callTool(client, 'query_dataset', { datasetId: 'C21_G01_LGA' });
 
         expect(requestedPaths.at(-1)).toMatch(/^\/rest\/data\/C21_G01_LGA\/all\?/);
+    });
+});
+
+describe('MCP server (list_dataflows against a stub)', () => {
+    let stub: StubAbsApi;
+    let client: Client;
+    let close: () => Promise<void>;
+    let cacheDir: string;
+    let cleanupCache: () => Promise<void>;
+
+    beforeAll(async () => {
+        const xml = await loadDataflowsXml();
+        stub = await startStubAbsApi((_req, res) => {
+            res.writeHead(200, { 'Content-Type': 'application/xml' });
+            res.end(xml);
+        });
+        ({ dir: cacheDir, cleanup: cleanupCache } = await makeTempDir());
+        ({ client, close } = await connectServer({
+            ABS_API_BASE: stub.baseUrl,
+            ABS_CACHE_FILE: path.join(cacheDir, 'dataflows.json'),
+        }));
+    });
+
+    afterAll(async () => {
+        await close?.();
+        await stub?.close();
+        await cleanupCache?.();
+    });
+
+    it('returns the dataflows parsed from the real captured payload', async () => {
+        // Exercises the whole wired path: server -> DataFlowService ->
+        // ABSApiClient -> XMLParser, against the 3.5 MB committed fixture.
+        const result = await callTool(client, 'list_dataflows', {});
+
+        expect(result.isError).toBeFalsy();
+        const output = result.structuredContent as { count: number; dataflows: unknown[] };
+        expect(output.count).toBe(FIXTURE_FLOW_COUNT);
+        expect(output.dataflows).toHaveLength(FIXTURE_FLOW_COUNT);
+    });
+
+    it('reports each dataflow with the fields a caller needs', async () => {
+        const result = await callTool(client, 'list_dataflows', {});
+        const output = result.structuredContent as {
+            dataflows: Array<{ id: string; name: string }>;
+        };
+
+        expect(output.dataflows[0]).toMatchObject({
+            id: FIXTURE_FIRST_FLOW.id,
+            agencyID: FIXTURE_FIRST_FLOW.agencyID,
+            version: FIXTURE_FIRST_FLOW.version,
+        });
+        expect(output.dataflows[0].name).toContain(FIXTURE_FIRST_FLOW.namePrefix);
+    });
+
+    it('honours a limit', async () => {
+        const result = await callTool(client, 'list_dataflows', { limit: 5 });
+        const output = result.structuredContent as { count: number; dataflows: unknown[] };
+
+        // `count` stays the full total so a caller knows the list was truncated.
+        expect(output.dataflows).toHaveLength(5);
+        expect(output.count).toBe(FIXTURE_FLOW_COUNT);
     });
 });
 

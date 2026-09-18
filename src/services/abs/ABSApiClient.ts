@@ -1,5 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import { ABS_API_BASE, ABS_REQUEST_TIMEOUT_MS } from '../../config.js';
 import type { DataFormat, DataQueryOptions, DetailLevel, ReferenceScope } from '../../types/abs.js';
 import { ABSError } from '../../types/abs.js';
 import logger from '../../utils/logger.js';
@@ -10,8 +11,8 @@ export class ABSApiClient {
 
     constructor() {
         this.api = axios.create({
-            baseURL: 'https://data.api.abs.gov.au',
-            timeout: 30000, // 30 seconds
+            baseURL: ABS_API_BASE,
+            timeout: ABS_REQUEST_TIMEOUT_MS,
             headers: {
                 Accept: 'application/xml',
             },
